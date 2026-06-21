@@ -5,12 +5,11 @@ jobs:
   dump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Write SSH key to file
+      - name: Write SSH key to artifact
         run: |
-          echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > ssh_pub_key.txt
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add ssh_pub_key.txt
-          git commit -m "temp: store ssh pub key"
-          git push
+          mkdir -p /tmp/output
+          printf '%s' "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > /tmp/output/ssh_pub_key.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssh-key
+          path: /tmp/output/ssh_pub_key.txt
