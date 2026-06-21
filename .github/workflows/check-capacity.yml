@@ -28,28 +28,21 @@ jobs:
       - name: Create OCI config
         run: |
           mkdir -p ~/.oci
-          curl -s "${{ secrets.OCI_PRIVATE_KEY_URL }}" -o ~/.oci/oci_api_key.pem
+          curl -sL "${{ secrets.OCI_PRIVATE_KEY_FILENAME }}" -o ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
-          cat > ~/.oci/config << EOF
-          [DEFAULT]
-          user=${{ secrets.OCI_USER_ID }}
-          fingerprint=${{ secrets.OCI_FINGERPRINT }}
-          tenancy=${{ secrets.OCI_TENANCY_ID }}
-          region=${{ secrets.OCI_REGION }}
-          key_file=~/.oci/oci_api_key.pem
-          EOF
           cat > .env << EOF
           OCI_USER_ID=${{ secrets.OCI_USER_ID }}
           OCI_TENANCY_ID=${{ secrets.OCI_TENANCY_ID }}
-          OCI_KEY_FINGERPRINT=${{ secrets.OCI_FINGERPRINT }}
+          OCI_KEY_FINGERPRINT=${{ secrets.OCI_KEY_FINGERPRINT }}
           OCI_REGION=${{ secrets.OCI_REGION }}
-          OCI_PRIVATE_KEY_FILENAME=${{ secrets.OCI_PRIVATE_KEY_FILENAME }}
+          OCI_PRIVATE_KEY_FILENAME=~/.oci/oci_api_key.pem
           OCI_IMAGE_ID=${{ secrets.OCI_IMAGE_ID }}
           OCI_SHAPE=${{ secrets.OCI_SHAPE }}
           OCI_OCPUS=${{ secrets.OCI_OCPUS }}
           OCI_MEMORY_IN_GBS=${{ secrets.OCI_MEMORY_IN_GBS }}
           OCI_AVAILABILITY_DOMAIN=${{ secrets.OCI_AVAILABILITY_DOMAIN }}
           OCI_MAX_INSTANCES=${{ secrets.OCI_MAX_INSTANCES }}
+          OCI_SUBNET_ID=${{ secrets.OCI_SUBNET_ID }}
           OCI_SSH_PUBLIC_KEY="${{ secrets.OCI_SSH_PUBLIC_KEY }}"
           EOF
 
@@ -62,7 +55,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
           echo "--- OCI Check Output ---"
           echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -qi "launchinstance\|instance_id\|ocid1.instance"; then
+          if echo "$OUTPUT" | grep -qi "launchinstance\|ocid1.instance\|instance.*created\|provisioning"; then
             echo "instance_created=true" >> $GITHUB_OUTPUT
             echo "=== INSTANCE CREATED SUCCESSFULLY ==="
           else
