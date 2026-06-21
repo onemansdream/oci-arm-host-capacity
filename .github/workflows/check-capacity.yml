@@ -1,33 +1,49 @@
-name: Check OCI Capacity
+name: Check OCI ARM Capacity
 
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      send_test_email:
+        description: 'Send a test email (yes/no)'
+        required: false
+        default: 'no'
 
 jobs:
-  run-script:
+  check-capacity:
     runs-on: ubuntu-latest
+    outputs:
+      instance_created: ${{ steps.check.outputs.instance_created }}
+      output_log: ${{ steps.check.outputs.output_log }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Set up PHP
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
 
-      - name: Install dependencies
-        run: composer install --no-dev --optimize-autoloader
-
-      - name: Create .env file
+      - name: Create OCI config
         run: |
-          cat > .env << 'EOF'
-          OCI_REGION=${{ secrets.OCI_REGION }}
+          mkdir -p ~/.oci
+          curl -s "${{ secrets.OCI_PRIVATE_KEY_URL }}" -o ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER_ID }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          tenancy=${{ secrets.OCI_TENANCY_ID }}
+          region=${{ secrets.OCI_REGION }}
+          key_file=~/.oci/oci_api_key.pem
+          EOF
+          cat > .env << EOF
           OCI_USER_ID=${{ secrets.OCI_USER_ID }}
           OCI_TENANCY_ID=${{ secrets.OCI_TENANCY_ID }}
-          OCI_KEY_FINGERPRINT=${{ secrets.OCI_KEY_FINGERPRINT }}
+          OCI_KEY_FINGERPRINT=${{ secrets.OCI_FINGERPRINT }}
+          OCI_REGION=${{ secrets.OCI_REGION }}
           OCI_PRIVATE_KEY_FILENAME=${{ secrets.OCI_PRIVATE_KEY_FILENAME }}
-          OCI_SUBNET_ID=${{ secrets.OCI_SUBNET_ID }}
           OCI_IMAGE_ID=${{ secrets.OCI_IMAGE_ID }}
           OCI_SHAPE=${{ secrets.OCI_SHAPE }}
           OCI_OCPUS=${{ secrets.OCI_OCPUS }}
@@ -38,4 +54,74 @@ jobs:
           EOF
 
       - name: Run OCI capacity check
-        run: php ./index.php
+        id: check
+        run: |
+          OUTPUT=$(php ./index.php 2>&1)
+          echo "output_log<<EOF" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "--- OCI Check Output ---"
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -qi "launchinstance\|instance_id\|ocid1.instance"; then
+            echo "instance_created=true" >> $GITHUB_OUTPUT
+            echo "=== INSTANCE CREATED SUCCESSFULLY ==="
+          else
+            echo "instance_created=false" >> $GITHUB_OUTPUT
+          fi
+
+  send-success-email:
+    runs-on: ubuntu-latest
+    needs: check-capacity
+    if: needs.check-capacity.outputs.instance_created == 'true'
+    steps:
+      - name: Send success notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: " OCI ARM Instance Created Successfully!"
+          to: onemansdreamcg@gmail.com
+          from: OCI Monitor <${{ secrets.GMAIL_USERNAME }}>
+          body: |
+            Your Oracle Cloud ARM instance has been created successfully!
+
+            === Instance Details ===
+            ${{ needs.check-capacity.outputs.output_log }}
+
+            === Next Steps ===
+            1. Go to OCI Console: https://cloud.oracle.com/compute/instances?region=ap-tokyo-1
+            2. Assign a public IP: Instance Details -> Attached VNICs -> IPv4 Addresses -> Edit -> Ephemeral
+            3. Get your SSH private key from Cloud Shell: cat ~/.ssh/oci_instance_key
+            4. SSH into your instance: ssh -i oci_instance_key ubuntu@<PUBLIC_IP>
+
+            Congratulations! Your free Ubuntu server is ready!
+
+  send-test-email:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.send_test_email == 'yes'
+    steps:
+      - name: Send test email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: " OCI Monitor Email Test - Configuration OK"
+          to: onemansdreamcg@gmail.com
+          from: OCI Monitor <${{ secrets.GMAIL_USERNAME }}>
+          body: |
+            This is a test email from your OCI ARM instance monitor.
+
+            Configuration is working correctly!
+
+            The monitor runs every 5 minutes and will send you an email
+            when your Oracle Cloud ARM instance is successfully created.
+
+            Keep an eye on your inbox at: onemansdreamcg@gmail.com
+
+            - OCI ARM Instance Monitor
