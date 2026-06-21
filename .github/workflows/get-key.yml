@@ -1,15 +1,76 @@
-name: Temp Get SSH Key
+name: Migrate Secrets to New Repo
 on:
   workflow_dispatch:
 jobs:
-  dump:
+  migrate:
     runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.GH_TOKEN }}
+      NEW_REPO: onemansdream/oci-instance-monitor
+      V_USER_ID: ${{ secrets.OCI_USER_ID }}
+      V_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}
+      V_KEY_FP: ${{ secrets.OCI_KEY_FINGERPRINT }}
+      V_PRIV_KEY_URL: ${{ secrets.OCI_PRIVATE_KEY_FILENAME }}
+      V_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+      V_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
+      V_SSH_PUB_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+      V_GMAIL_USER: ${{ secrets.GMAIL_USERNAME }}
+      V_GMAIL_PASS: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
-      - name: Write SSH key to artifact
+      - name: Set secrets in new repo
         run: |
-          mkdir -p /tmp/output
-          printf '%s' "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > /tmp/output/ssh_pub_key.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ssh-key
-          path: /tmp/output/ssh_pub_key.txt
+          pip install PyNaCl -q
+          python3 << 'PYEOF'
+import urllib.request, json, base64, os
+from nacl import encoding, public
+
+GH_TOKEN = os.environ["GH_PAT"]
+NEW_REPO = os.environ["NEW_REPO"]
+
+SECRETS = {
+    "OCI_USER_ID": os.environ["V_USER_ID"],
+    "OCI_TENANCY_ID": os.environ["V_TENANCY_ID"],
+    "OCI_KEY_FINGERPRINT": os.environ["V_KEY_FP"],
+    "OCI_PRIVATE_KEY_FILENAME": os.environ["V_PRIV_KEY_URL"],
+    "OCI_SUBNET_ID": os.environ["V_SUBNET_ID"],
+    "OCI_IMAGE_ID": os.environ["V_IMAGE_ID"],
+    "OCI_SSH_PUBLIC_KEY": os.environ["V_SSH_PUB_KEY"],
+    "GMAIL_USERNAME": os.environ["V_GMAIL_USER"],
+    "GMAIL_APP_PASSWORD": os.environ["V_GMAIL_PASS"],
+    "OCI_REGION": "ap-tokyo-1",
+    "OCI_SHAPE": "VM.Standard.A1.Flex",
+    "OCI_OCPUS": "2",
+    "OCI_MEMORY_IN_GBS": "12",
+    "OCI_AVAILABILITY_DOMAIN": "PEtm:AP-TOKYO-1-AD-1",
+    "OCI_MAX_INSTANCES": "1",
+}
+
+def gpk():
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{NEW_REPO}/actions/secrets/public-key",
+        headers={"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"})
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())
+
+def enc(pk_str, val):
+    pk = public.PublicKey(pk_str.encode(), encoding.Base64Encoder())
+    return base64.b64encode(public.SealedBox(pk).encrypt(val.encode())).decode()
+
+def ss(kid, kval, name, value):
+    data = json.dumps({"encrypted_value": enc(kval, value), "key_id": kid}).encode()
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{NEW_REPO}/actions/secrets/{name}",
+        data=data, method="PUT",
+        headers={"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            print(f"OK: {name} HTTP {r.status}")
+    except Exception as e:
+        print(f"FAIL: {name} - {e}")
+
+pk = gpk()
+for n, v in SECRETS.items():
+    ss(pk["key_id"], pk["key"], n, v)
+print("Done!")
+PYEOF
