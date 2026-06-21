@@ -1,0 +1,9 @@
+name: Temp Get SSH Key
+on:
+  workflow_dispatch:
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show SSH public key
+        run: echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}"
